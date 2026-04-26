@@ -1,0 +1,11 @@
+# Streamlit theme — Phase 8 dark UI.
+# Aligns built-in widgets (selects, sliders, inputs, sidebar) with the
+# custom CSS in `src/milestone1/phase8_streamlit/app.py`.
+
+[theme]
+base = "dark"
+primaryColor = "#ef4f5e"
+backgroundColor = "#0f1115"
+secondaryBackgroundColor = "#1a1d23"
+textColor = "#e5e7eb"
+font = "sans serif"
