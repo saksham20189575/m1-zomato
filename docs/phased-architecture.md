@@ -1,6 +1,6 @@
 # Phase-wise architecture: restaurant recommendation system
 
-This document breaks the build into **phases** that map to the workflow in [problemstatement.md](./problemstatement.md): data ingestion → user input → integration (filter + prompt prep) → LLM recommendation → output display → **HTTP API (backend)** → **web UI (frontend)** for the shipped product, plus an optional **Streamlit** path for **simple free deployment** and demos.
+This document breaks the build into **phases** that map to the workflow in [problemstatement.md](./problemstatement.md): data ingestion → user input → integration (filter + prompt prep) → LLM recommendation → output display → **HTTP API (backend)** → **web UI (frontend)** → **deployment** of the API to **Render** and the web UI to **Vercel** for the shipped product.
 
 ## High-level system view
 
@@ -150,19 +150,19 @@ After Phase 5, the **product** shape is a small **client–server** system: a **
 
 ---
 
-## Phase 8 — Deployment using Streamlit (optional)
+## Phase 8 — Deployment (Render backend + Vercel frontend)
 
 | Concern | Approach |
 |---------|----------|
-| **Role** | A **single-process Python app** (Streamlit) that exposes the same recommendation flow as the CLI/API: preferences in widgets → load corpus (Phase 1) → validate (Phase 2) → filter + prompt (Phase 3) → `recommend_with_groq` (Phase 4) → render ranked cards with explanations (Phase 5 semantics). **No Node build** and no separate SPA host required for this path. |
-| **Secrets** | `GROQ_API_KEY` (and optional `GROQ_MODEL`) via **Streamlit secrets** (`st.secrets`) on [Streamlit Community Cloud](https://streamlit.io/cloud) or via environment variables when self-hosting—same rules as Phase 6: keys never ship to the browser client bundle; Streamlit runs logic **server-side**. |
-| **Deployment (free tier)** | **Streamlit Community Cloud**: connect the GitHub repo, set the main file path (e.g. `streamlit_app.py` or `src/milestone1/phase8_streamlit/app.py`), add secrets in the dashboard, deploy. Cold starts and resource limits apply on the free tier; keep `load_limit` / `candidate_cap` conservative. Alternatives: **Docker** image (`streamlit run …`) on Render/Fly/other free allowances. |
-| **Relationship to Phase 6–7** | **Complementary:** Phase 7 remains the primary **product** UI (browser + REST). Phase 8 is ideal for **course demos**, **stakeholder previews**, and **fast sharing** without operating Vite + CORS + two deployables. You may implement Streamlit **without** calling the HTTP API by importing `milestone1` directly (duplication of orchestration is acceptable if thin); alternatively call `POST /api/v1/recommendations` if you want one orchestration path. |
-| **UX scope** | Forms with `st.selectbox` / `st.text_input` / `st.slider` for location, cuisines, budget, minimum rating, and additional text; `st.spinner` while the model runs; `st.expander` for raw JSON or telemetry if useful. Match empty-state copy from Phase 5 where practical. |
+| **Role** | Ship the Phase 6 API and the Phase 7 web UI as **two independent deployments**: FastAPI to **Render** (server-side: owns `GROQ_API_KEY`, Hugging Face access, orchestration) and the Vite + React SPA to **Vercel** (browser-only, statically built, calls the Render URL). |
+| **Backend (Render)** | Web Service running `uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT`. Build with `pip install -e .` (no extras needed). Free-tier dynos sleep when idle—cold starts are expected; the existing `_prewarm` thread warms locations on startup. Health check: **`GET /health`**. Secrets via Render env vars: **`GROQ_API_KEY`** (required), optional **`GROQ_MODEL`**, optional **`HF_TOKEN`**. **`CORS_ORIGINS`** must list the Vercel deployment(s). |
+| **Frontend (Vercel)** | Static build of `frontend/` (Vite). **Root Directory:** `frontend/`. **Build:** `npm install && npm run build`. **Output:** `dist`. Single env var: **`VITE_API_BASE_URL=https://<render-service>.onrender.com`** (baked at build time). No server-side runtime; SPA fallback rewrites all paths to `index.html`. |
+| **Secrets boundary** | `GROQ_API_KEY` and `HF_TOKEN` live **only on Render**. The Vercel bundle is browser-public; never put provider keys in `VITE_*` vars. CORS on the Render side is the only permitted cross-origin path. |
+| **Relationship to Phase 6–7** | **Direct lift:** Phase 6 is what Render serves; Phase 7 is what Vercel serves. No new code paths—just hosting + env wiring. |
 
-**Exit criteria:** README (or a short `docs/streamlit-deploy.md`) documents how to run locally (`streamlit run …`) and how to deploy to Community Cloud (repo layout, secrets names, branch); a reviewer can open the hosted URL and complete one successful recommendation or see an intentional empty state.
+**Exit criteria:** [`docs/deployment.md`](./deployment.md) documents repo prep, Render service config, Vercel project config, env vars, and CORS wiring; a reviewer can open the Vercel URL, submit preferences, and get a Groq-backed recommendation served by Render — or an intentional empty state on `no_candidates` / `fallback`.
 
-**Implemented:** package `src/milestone1/phase8_streamlit/` (`app.py`), repo root **`streamlit_app.py`** (Cloud entrypoint), optional dependency **`[streamlit]`** in `pyproject.toml`, and [streamlit-deploy.md](./streamlit-deploy.md).
+**Implemented:** see [`docs/deployment.md`](./deployment.md). No new packages — Phase 8 is configuration over Phases 6 and 7.
 
 ---
 
@@ -186,16 +186,15 @@ flowchart TD
   P5[Phase 5 Output UX]
   P6[Phase 6 Backend API]
   P7[Phase 7 Frontend web]
-  P8[Phase 8 Streamlit deploy]
+  P8[Phase 8 Deploy Render and Vercel]
   P9[Phase 9 Hardening]
   P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
   P6 --> P7
-  P6 --> P8
-  P7 --> P9
+  P7 --> P8
   P8 --> P9
 ```
 
-Phases **0–2** can overlap slightly (e.g. stub UI while data loads), but **3** should not depend on the LLM until filters are correct; **4** should not own business rules that belong in **3**. The **frontend (7)** must not skip the **API (6)** for provider keys or dataset access. **Phase 8** may bypass Phase 7 by calling the **library** directly but must still keep **Groq** and **Hub** access **server-side** only.
+Phases **0–2** can overlap slightly (e.g. stub UI while data loads), but **3** should not depend on the LLM until filters are correct; **4** should not own business rules that belong in **3**. The **frontend (7)** must not skip the **API (6)** for provider keys or dataset access. **Phase 8** is hosting only — it never moves provider keys into the browser bundle; **Groq** and **Hugging Face** access stay on Render.
 
 ---
 
@@ -220,26 +219,32 @@ flowchart LR
   LIB --> GROQ
 ```
 
-### Optional: Streamlit deployment (Phase 8)
+### Deployment view (Phase 8)
 
 ```mermaid
 flowchart LR
   subgraph client [Browser]
-    ST[Streamlit UI]
+    FE[Vite static bundle]
   end
-  subgraph server [Streamlit host]
-    APP[Streamlit app Python]
+  subgraph vercel [Vercel CDN]
+    STATIC[Static assets index.html dist]
+  end
+  subgraph render [Render web service]
+    API[FastAPI uvicorn]
     LIB[milestone1 library Phases 1 to 5]
   end
   subgraph external [External]
     HF[Hugging Face Hub]
     GROQ[Groq API]
   end
-  ST <-->|Server-driven UI| APP
-  APP --> LIB
+  FE -->|asset fetch| STATIC
+  FE -->|JSON HTTPS CORS| API
+  API --> LIB
   LIB --> HF
   LIB --> GROQ
 ```
+
+`VITE_API_BASE_URL` (Vercel build env) points the SPA at the Render URL. `GROQ_API_KEY` lives only on Render. CORS on Render is locked down to the Vercel origin(s).
 
 ---
 
@@ -255,7 +260,7 @@ flowchart LR
 | Output display | 5 |
 | **Serving the product (API)** | **6** |
 | **Serving the product (browser UI)** | **7** |
-| **Deployed demo / sharing (Streamlit)** | **8** |
+| **Deployment (Render + Vercel)** | **8** |
 | **Hardening, tests, README handoff** | **9** |
 
-This keeps the architecture **phase-wise** for planning and milestones while preserving a **layered** runtime design (data → rules → model → presentation), then a **client–server shell** (API + UI) around that core, with an optional **Streamlit** deploy path for lightweight hosting.
+This keeps the architecture **phase-wise** for planning and milestones while preserving a **layered** runtime design (data → rules → model → presentation), then a **client–server shell** (API + UI) around that core, deployed as a Render service plus a Vercel static site.

@@ -17,14 +17,12 @@ src/milestone1/
   phase4_llm/            # Groq client + recommend_with_groq
   phase5_output/         # markdown/plain render + telemetry helpers
   phase6_api/            # FastAPI HTTP API (Phase 6)
-  phase8_streamlit/      # Streamlit UI + deploy path (Phase 8, optional extra)
 tests/
   phase0/ …
 frontend/                # Vite + React web UI (Phase 7) — see “Run the web app”
-streamlit_app.py         # Phase 8 entry for `streamlit run` / Streamlit Cloud
 ```
 
-Each `phaseN_*` package through Phase 5 may own a `commands.py` registered from `cli.py`. **Phase 6 (API) and Phase 7 (web)** are started separately from the `milestone1` CLI. **Phase 8 (Streamlit)** is optional; see below.
+Each `phaseN_*` package through Phase 5 may own a `commands.py` registered from `cli.py`. **Phase 6 (API) and Phase 7 (web)** are started separately from the `milestone1` CLI. **Phase 8 (deployment)** ships the API to Render and the web UI to Vercel — see [`docs/deployment.md`](docs/deployment.md).
 
 ## Setup
 
@@ -33,8 +31,6 @@ cd /path/to/milestone1
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-# optional: Streamlit Phase 8 UI
-# pip install -e ".[streamlit]"
 cp .env.example .env        # add keys when you reach Phase 4+
 ```
 
@@ -121,17 +117,9 @@ npm run dev
 
 Open **http://localhost:5173** — the UI includes location hints from **`GET /api/v1/meta`**, form fields matching Phase 2, two distinct empty states, result cards, optional Groq “advanced” fields, and **Copy as Markdown**.
 
-## Phase 8 — Streamlit (`streamlit_app.py`)
+## Phase 8 — Deployment (Render + Vercel)
 
-All-Python UI that calls the **same** recommendation path as the HTTP API (`recommend_to_response`), without Node or a separate API process. Useful for demos and [Streamlit Community Cloud](https://streamlit.io/cloud).
-
-```bash
-pip install -e ".[streamlit]"
-# GROQ_API_KEY in project root .env (same as Phase 6)
-streamlit run streamlit_app.py
-```
-
-Deploy notes, Cloud secrets, and troubleshooting: [`docs/streamlit-deploy.md`](docs/streamlit-deploy.md). Optional requirements file for hosts that need it: [`requirements-streamlit.txt`](requirements-streamlit.txt).
+The shipped product is two independent deployments: the FastAPI service on **Render** (owns `GROQ_API_KEY`, dataset access) and the Vite + React app on **Vercel** (browser-only, points at the Render URL via `VITE_API_BASE_URL`). Step-by-step guide, env vars, and config snippets: [`docs/deployment.md`](docs/deployment.md).
 
 ## Tests
 
