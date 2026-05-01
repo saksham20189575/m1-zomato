@@ -40,7 +40,7 @@ Railway reads `railway.toml` (or `railway.json`) at the repo root and uses it as
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT"
+startCommand = "/opt/venv/bin/uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
@@ -49,14 +49,42 @@ restartPolicyMaxRetries = 3
 
 Notes:
 
-- **Builder** is Nixpacks (Railway's default). It detects Python from `pyproject.toml` + `runtime.txt` and runs `pip install .` automatically — no `buildCommand` override needed.
-- **Start command** binds `0.0.0.0:$PORT` so Railway's router can reach it. `milestone1.phase6_api.app:app` is module-scope (`app = create_app()`), so uvicorn imports it without invoking the `milestone1-api` console script.
+- **Builder** is Nixpacks (Railway's default). It picks the Python version from `runtime.txt`, then installs the project according to `nixpacks.toml` (see §0.3).
+- **Start command** points at the absolute path of `uvicorn` inside the Nixpacks venv (`/opt/venv/bin/uvicorn`), so it doesn't depend on PATH inheritance from the build phase. `milestone1.phase6_api.app:app` is module-scope (`app = create_app()`), so uvicorn imports it without invoking the `milestone1-api` console script.
 - **Health check** points at `/health`. Railway will mark the deploy unhealthy and roll back if `/health` doesn't return 2xx within `healthcheckTimeout` seconds.
 - **Restart policy** auto-recovers on transient crashes (e.g. HF Hub timeouts) up to 3 times before failing the deploy.
 
 Secrets and tunables are **not** in this file — they live in the Railway dashboard's **Variables** panel (see §1.3).
 
-### 0.3 Optional: `frontend/vercel.json`
+### 0.3 `nixpacks.toml` (build phase override)
+
+Nixpacks' default Python provider runs `pip install .` in the **install phase**, which only has `pyproject.toml` copied into it (not `src/` or `README.md`). Our project uses a src-layout via `[tool.setuptools.packages.find] where = ["src"]` and `readme = "README.md"`, so setuptools fails the build with:
+
+```
+File '/app/README.md' cannot be found
+error in 'egg_base' option: 'src' does not exist or is not a directory
+```
+
+The committed `nixpacks.toml` fixes this by keeping the install phase to package-management tools only and deferring `pip install .` to the **build phase**, which runs *after* the full source tree has been copied into `/app`:
+
+```toml
+providers = ["python"]
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip setuptools wheel",
+]
+
+[phases.build]
+cmds = [
+  ". /opt/venv/bin/activate && pip install .",
+]
+```
+
+Docker layer caching for pip/setuptools/wheel still works (their layer is keyed on `pyproject.toml`'s hash, which only changes when deps change). The Python interpreter is still selected by `runtime.txt` via Nixpacks' default setup phase.
+
+### 0.4 Optional: `frontend/vercel.json`
 
 Vercel auto-detects Vite, but a small config makes SPA fallback explicit and avoids surprises if you add client-side routing later:
 
@@ -236,6 +264,7 @@ If any step fails, see §5.
 | `/api/v1/meta` 500s with HF errors | Hugging Face throttle. Set `HF_TOKEN` on Railway, or lower `LOAD_LIMIT`. |
 | Vercel build fails on `tsc --noEmit` | Same TS error you would see locally — fix in `frontend/`, push, Vercel rebuilds. |
 | Railway build fails on `pip install` | Confirm `runtime.txt` is `python-3.11.x`; check the Nixpacks log under **Deployments → View Logs** for the failing step. |
+| Railway build fails with `'src' does not exist` or `README.md cannot be found` | The default Nixpacks Python install phase doesn't copy `src/` or `README.md` before `pip install .` runs. Confirm `nixpacks.toml` is present at the repo root (see §0.3) — it moves `pip install .` to the build phase where the full tree is available. |
 | Railway healthcheck fails after deploy | App didn't bind `0.0.0.0:$PORT` in time. Confirm the start command in `railway.toml`; consider raising `healthcheckTimeout` if HF is slow. |
 | Logs show `Ran out of memory` | Apply the §1.5 escape valves: `PREWARM=0`, then lower `LOAD_LIMIT`. |
 

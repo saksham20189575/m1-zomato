@@ -1,0 +1,30 @@
+# Nixpacks build override (used by Railway).
+#
+# Why this exists: Nixpacks' default Python provider runs ``pip install .``
+# in the *install* phase, which only has ``pyproject.toml`` copied into it
+# (not ``src/`` or ``README.md``). Our project uses a src-layout via
+# ``[tool.setuptools.packages.find] where = ["src"]`` and ``readme = "README.md"``,
+# so setuptools fails the build with:
+#   File '/app/README.md' cannot be found
+#   error in 'egg_base' option: 'src' does not exist or is not a directory
+#
+# Fix: keep the install phase for package-management tools only (so Docker
+# layer caching for pip/setuptools/wheel still works), and defer the actual
+# ``pip install .`` to the build phase, which runs after the full source tree
+# is copied into ``/app``.
+#
+# The Python interpreter is still selected by ``runtime.txt`` via Nixpacks'
+# default setup phase.
+
+providers = ["python"]
+
+[phases.install]
+cmds = [
+  "python -m venv --copies /opt/venv",
+  ". /opt/venv/bin/activate && pip install --upgrade pip setuptools wheel",
+]
+
+[phases.build]
+cmds = [
+  ". /opt/venv/bin/activate && pip install .",
+]
