@@ -13,9 +13,20 @@ DEFAULT_CORS_ORIGINS = (
 ENV_CORS_ORIGINS = "CORS_ORIGINS"
 
 # Hub scan bound for POST /recommendations (avoid unbounded streaming).
+# ``DEFAULT_LOAD_LIMIT`` is a compile-time fallback; the API resolves the
+# effective value at request time via ``effective_default_load_limit()``,
+# which honors the ``LOAD_LIMIT`` env (see ``service.py``). Override on
+# memory-constrained hosts (e.g. Render free tier: ``LOAD_LIMIT=3000``).
 DEFAULT_LOAD_LIMIT = 8_000
 MIN_LOAD_LIMIT = 1
 MAX_LOAD_LIMIT = 100_000
+
+ENV_LOAD_LIMIT = "LOAD_LIMIT"
+
+# Background prewarm (locations cache) at app startup. Disable on memory-tight
+# tiers via ``PREWARM=0`` so the boot RSS stays small; the first ``/api/v1/meta``
+# call will load on demand.
+ENV_PREWARM = "PREWARM"
 
 # Meta: cities list cap in JSON response.
 DEFAULT_META_CITIES_CAP = 500

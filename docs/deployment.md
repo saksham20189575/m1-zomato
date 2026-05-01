@@ -108,6 +108,8 @@ Set in **Environment → Environment Variables**:
 | `HF_TOKEN` | optional | Higher Hugging Face Hub rate limits when streaming the dataset. |
 | `CORS_ORIGINS` | **yes (after Vercel deploy)** | Comma-separated list of allowed browser origins. See §3. |
 | `PORT` | auto | Render injects this; the app reads it via `uvicorn ... --port $PORT`. |
+| `PREWARM` | recommended `0` on free tier | Set to `0` to skip the boot-time locations preload (see §1.5). |
+| `LOAD_LIMIT` | recommended `3000` on free tier | Caps Hub rows scanned per request; lower = less RAM (see §1.5). |
 
 Do **not** add `API_HOST` — the start command already binds `0.0.0.0`.
 
@@ -122,6 +124,25 @@ After the first deploy, hit:
 Note the service URL — it goes into the Vercel build env next.
 
 > **Cold starts:** Render free-tier services sleep after ~15 minutes of inactivity. The first request after sleep can take 30–60 s. The Phase 6 prewarm thread reduces *post-startup* latency but does not eliminate the dyno boot itself. If demos need snappy first hits, upgrade the plan or hit `/health` from an uptime pinger (Better Stack / cron-job.org).
+
+### 1.5 Memory budget on the free tier (512 MB)
+
+Render's free Python web service is hard-capped at **512 MB RSS**. The dataset + LLM stack lands close to that cap by default, so the deploy ships two tunables:
+
+| Tunable | Default | On Render free | Effect |
+|---------|---------|----------------|--------|
+| `PREWARM` | `1` (on) | **`0`** | When off, the startup hook skips the background thread that loads ~8 000 rows into memory. The first `/api/v1/meta` call pays that cost on demand instead, against an already-warm process — and only once until the dyno sleeps. |
+| `LOAD_LIMIT` | `8000` | **`3000`** | Caps the per-request Hugging Face streaming scan. Each row is a normalized `Restaurant` dataclass. Halving the cap roughly halves the per-request transient allocation. |
+
+Both are pre-wired in `render.yaml`; no dashboard action required.
+
+**What's also pruned in code:** Phase 1 normalization (`row_to_restaurant`) deliberately discards Hub columns no downstream phase reads — `address`, `menu_sample`, `dishes_liked`, `phone`, `url`, `restaurant_type`, `listing_type`, `online_order`, `book_table`, `approx_cost_two_raw`. On this dataset, `menu_item` and `dishes_liked` alone can be tens of KB per row; dropping them keeps a 3 000-row in-memory load under ~10 MB.
+
+If the instance still OOMs:
+
+1. Lower `LOAD_LIMIT` further (e.g. `2000`, then `1500`). Trade-off: smaller candidate pool, fewer cities in `/api/v1/meta`.
+2. Confirm `PREWARM=0` and that you're not running multiple uvicorn workers (the start command in `render.yaml` is single-worker by default — do not add `--workers 2`).
+3. Last resort: bump to a paid Render plan with more RAM. The 1 GB tier deletes the constraint; bump back the env vars to the defaults above.
 
 ---
 
@@ -202,6 +223,7 @@ If any step fails, see §5.
 | `/api/v1/meta` 500s with HF errors | Hugging Face throttle. Set `HF_TOKEN` on Render, or lower `load_limit`. |
 | Vercel build fails on `tsc --noEmit` | Same TS error you would see locally — fix in `frontend/`, push, Vercel rebuilds. |
 | Render build fails on `pip install -e .` | Confirm `runtime.txt` is `python-3.11.x`; Render's default Python may be too old. |
+| Render logs `Ran out of memory (used over 512MB)` | Free-tier RSS cap. Confirm `PREWARM=0` and lower `LOAD_LIMIT` (try `2000`, then `1500`). See §1.5. |
 
 ---
 

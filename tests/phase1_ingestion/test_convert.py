@@ -53,8 +53,24 @@ def test_row_to_restaurant_maps_fields() -> None:
     assert r.approx_cost_two == 600
     assert r.budget_band == BudgetBand.MEDIUM
     assert r.votes == 42
-    assert r.book_table is True
-    assert r.online_order is False
+
+
+def test_row_to_restaurant_drops_unused_fields_for_memory() -> None:
+    # Phase 1 deliberately discards descriptive Hub columns that no downstream
+    # phase reads, to keep an in-memory load comfortably inside Render's
+    # 512 MB free tier. See ``row_to_restaurant`` docstring.
+    r = row_to_restaurant(_full_row())
+    assert r is not None
+    assert r.address == ""
+    assert r.approx_cost_two_raw is None
+    assert r.restaurant_type is None
+    assert r.listing_type is None
+    assert r.online_order is None
+    assert r.book_table is None
+    assert r.menu_sample is None
+    assert r.dishes_liked is None
+    assert r.url is None
+    assert r.phone is None
 
 
 def test_row_to_restaurant_skips_blank_name() -> None:

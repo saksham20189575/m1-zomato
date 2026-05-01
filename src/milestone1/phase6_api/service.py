@@ -9,7 +9,14 @@ from milestone1.phase4_llm.constants import DEFAULT_GROQ_MODEL
 from milestone1.phase4_llm.model import RankedRecommendation, RecommendResult
 from milestone1.phase4_llm.recommend import recommend_with_groq
 
-from milestone1.phase6_api.constants import DEFAULT_LOAD_LIMIT, MAX_META_CITIES_CAP, MIN_META_CITIES_CAP
+from milestone1.phase6_api.constants import (
+    DEFAULT_LOAD_LIMIT,
+    ENV_LOAD_LIMIT,
+    MAX_LOAD_LIMIT,
+    MAX_META_CITIES_CAP,
+    MIN_LOAD_LIMIT,
+    MIN_META_CITIES_CAP,
+)
 from milestone1.phase6_api.schemas import MetaResponse, RankingDTO, RecommendRequest, RecommendResponse, RestaurantDTO
 
 log = logging.getLogger("milestone1.phase6_api")
@@ -17,6 +24,28 @@ log = logging.getLogger("milestone1.phase6_api")
 
 def _resolved_model(explicit: str | None) -> str:
     return explicit if explicit else os.environ.get("GROQ_MODEL", DEFAULT_GROQ_MODEL)
+
+
+def effective_default_load_limit() -> int:
+    """Resolve the default load limit, honoring ``LOAD_LIMIT`` env override.
+
+    Falls back to ``DEFAULT_LOAD_LIMIT`` when unset, malformed, or out of range.
+    """
+    raw = os.environ.get(ENV_LOAD_LIMIT, "").strip()
+    if not raw:
+        return DEFAULT_LOAD_LIMIT
+    try:
+        v = int(raw)
+    except ValueError:
+        log.warning("invalid %s=%r; falling back to %d", ENV_LOAD_LIMIT, raw, DEFAULT_LOAD_LIMIT)
+        return DEFAULT_LOAD_LIMIT
+    if v < MIN_LOAD_LIMIT or v > MAX_LOAD_LIMIT:
+        log.warning(
+            "%s=%d out of [%d, %d]; falling back to %d",
+            ENV_LOAD_LIMIT, v, MIN_LOAD_LIMIT, MAX_LOAD_LIMIT, DEFAULT_LOAD_LIMIT,
+        )
+        return DEFAULT_LOAD_LIMIT
+    return v
 
 
 def _ranking_to_dto(r: RankedRecommendation) -> RankingDTO:
@@ -46,7 +75,7 @@ def _ranking_to_dto(r: RankedRecommendation) -> RankingDTO:
 
 
 def recommend_to_response(req: RecommendRequest) -> RecommendResponse:
-    load_lim = req.load_limit if req.load_limit is not None else DEFAULT_LOAD_LIMIT
+    load_lim = req.load_limit if req.load_limit is not None else effective_default_load_limit()
     rows = load_restaurants(limit=load_lim, dedupe=True)
     allowed = sorted(allowed_locations_from_restaurants(rows))
 

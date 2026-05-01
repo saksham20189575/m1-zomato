@@ -16,3 +16,8 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Memory tunables for the 512 MB free tier — see docs/deployment.md §1.5.
+      - key: PREWARM
+        value: "0"
+      - key: LOAD_LIMIT
+        value: "3000"
