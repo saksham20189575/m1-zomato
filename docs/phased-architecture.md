@@ -1,6 +1,6 @@
 # Phase-wise architecture: restaurant recommendation system
 
-This document breaks the build into **phases** that map to the workflow in [problemstatement.md](./problemstatement.md): data ingestion → user input → integration (filter + prompt prep) → LLM recommendation → output display → **HTTP API (backend)** → **web UI (frontend)** → **deployment** of the API to **Render** and the web UI to **Vercel** for the shipped product.
+This document breaks the build into **phases** that map to the workflow in [problemstatement.md](./problemstatement.md): data ingestion → user input → integration (filter + prompt prep) → LLM recommendation → output display → **HTTP API (backend)** → **web UI (frontend)** → **deployment** of the API to **Railway** and the web UI to **Vercel** for the shipped product.
 
 ## High-level system view
 
@@ -150,17 +150,17 @@ After Phase 5, the **product** shape is a small **client–server** system: a **
 
 ---
 
-## Phase 8 — Deployment (Render backend + Vercel frontend)
+## Phase 8 — Deployment (Railway backend + Vercel frontend)
 
 | Concern | Approach |
 |---------|----------|
-| **Role** | Ship the Phase 6 API and the Phase 7 web UI as **two independent deployments**: FastAPI to **Render** (server-side: owns `GROQ_API_KEY`, Hugging Face access, orchestration) and the Vite + React SPA to **Vercel** (browser-only, statically built, calls the Render URL). |
-| **Backend (Render)** | Web Service running `uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT`. Build with `pip install -e .` (no extras needed). Free-tier dynos sleep when idle—cold starts are expected; the existing `_prewarm` thread warms locations on startup. Health check: **`GET /health`**. Secrets via Render env vars: **`GROQ_API_KEY`** (required), optional **`GROQ_MODEL`**, optional **`HF_TOKEN`**. **`CORS_ORIGINS`** must list the Vercel deployment(s). |
-| **Frontend (Vercel)** | Static build of `frontend/` (Vite). **Root Directory:** `frontend/`. **Build:** `npm install && npm run build`. **Output:** `dist`. Single env var: **`VITE_API_BASE_URL=https://<render-service>.onrender.com`** (baked at build time). No server-side runtime; SPA fallback rewrites all paths to `index.html`. |
-| **Secrets boundary** | `GROQ_API_KEY` and `HF_TOKEN` live **only on Render**. The Vercel bundle is browser-public; never put provider keys in `VITE_*` vars. CORS on the Render side is the only permitted cross-origin path. |
-| **Relationship to Phase 6–7** | **Direct lift:** Phase 6 is what Render serves; Phase 7 is what Vercel serves. No new code paths—just hosting + env wiring. |
+| **Role** | Ship the Phase 6 API and the Phase 7 web UI as **two independent deployments**: FastAPI to **Railway** (server-side: owns `GROQ_API_KEY`, Hugging Face access, orchestration) and the Vite + React SPA to **Vercel** (browser-only, statically built, calls the Railway URL). |
+| **Backend (Railway)** | Service built by **Nixpacks** from `pyproject.toml` + `runtime.txt`, started with `uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT`. Health check: **`GET /health`**. Service-level config lives in committed `railway.toml`. Secrets via Railway variables: **`GROQ_API_KEY`** (required), optional **`GROQ_MODEL`**, optional **`HF_TOKEN`**. **`CORS_ORIGINS`** must list the Vercel deployment(s). Optional memory escape valves: **`PREWARM=0`**, **`LOAD_LIMIT=<int>`**. |
+| **Frontend (Vercel)** | Static build of `frontend/` (Vite). **Root Directory:** `frontend/`. **Build:** `npm install && npm run build`. **Output:** `dist`. Single env var: **`VITE_API_BASE_URL=https://<railway-service>.up.railway.app`** (baked at build time). No server-side runtime; SPA fallback rewrites all paths to `index.html`. |
+| **Secrets boundary** | `GROQ_API_KEY` and `HF_TOKEN` live **only on Railway**. The Vercel bundle is browser-public; never put provider keys in `VITE_*` vars. CORS on the Railway side is the only permitted cross-origin path. |
+| **Relationship to Phase 6–7** | **Direct lift:** Phase 6 is what Railway serves; Phase 7 is what Vercel serves. No new code paths — just hosting + env wiring. |
 
-**Exit criteria:** [`docs/deployment.md`](./deployment.md) documents repo prep, Render service config, Vercel project config, env vars, and CORS wiring; a reviewer can open the Vercel URL, submit preferences, and get a Groq-backed recommendation served by Render — or an intentional empty state on `no_candidates` / `fallback`.
+**Exit criteria:** [`docs/deployment.md`](./deployment.md) documents repo prep, Railway service config, Vercel project config, env vars, and CORS wiring; a reviewer can open the Vercel URL, submit preferences, and get a Groq-backed recommendation served by Railway — or an intentional empty state on `no_candidates` / `fallback`.
 
 **Implemented:** see [`docs/deployment.md`](./deployment.md). No new packages — Phase 8 is configuration over Phases 6 and 7.
 
@@ -186,7 +186,7 @@ flowchart TD
   P5[Phase 5 Output UX]
   P6[Phase 6 Backend API]
   P7[Phase 7 Frontend web]
-  P8[Phase 8 Deploy Render and Vercel]
+  P8[Phase 8 Deploy Railway and Vercel]
   P9[Phase 9 Hardening]
   P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
   P6 --> P7
@@ -194,7 +194,7 @@ flowchart TD
   P8 --> P9
 ```
 
-Phases **0–2** can overlap slightly (e.g. stub UI while data loads), but **3** should not depend on the LLM until filters are correct; **4** should not own business rules that belong in **3**. The **frontend (7)** must not skip the **API (6)** for provider keys or dataset access. **Phase 8** is hosting only — it never moves provider keys into the browser bundle; **Groq** and **Hugging Face** access stay on Render.
+Phases **0–2** can overlap slightly (e.g. stub UI while data loads), but **3** should not depend on the LLM until filters are correct; **4** should not own business rules that belong in **3**. The **frontend (7)** must not skip the **API (6)** for provider keys or dataset access. **Phase 8** is hosting only — it never moves provider keys into the browser bundle; **Groq** and **Hugging Face** access stay on Railway.
 
 ---
 
@@ -229,7 +229,7 @@ flowchart LR
   subgraph vercel [Vercel CDN]
     STATIC[Static assets index.html dist]
   end
-  subgraph render [Render web service]
+  subgraph railway [Railway service]
     API[FastAPI uvicorn]
     LIB[milestone1 library Phases 1 to 5]
   end
@@ -244,7 +244,7 @@ flowchart LR
   LIB --> GROQ
 ```
 
-`VITE_API_BASE_URL` (Vercel build env) points the SPA at the Render URL. `GROQ_API_KEY` lives only on Render. CORS on Render is locked down to the Vercel origin(s).
+`VITE_API_BASE_URL` (Vercel build env) points the SPA at the Railway URL. `GROQ_API_KEY` lives only on Railway. CORS on Railway is locked down to the Vercel origin(s).
 
 ---
 
@@ -260,7 +260,7 @@ flowchart LR
 | Output display | 5 |
 | **Serving the product (API)** | **6** |
 | **Serving the product (browser UI)** | **7** |
-| **Deployment (Render + Vercel)** | **8** |
+| **Deployment (Railway + Vercel)** | **8** |
 | **Hardening, tests, README handoff** | **9** |
 
-This keeps the architecture **phase-wise** for planning and milestones while preserving a **layered** runtime design (data → rules → model → presentation), then a **client–server shell** (API + UI) around that core, deployed as a Render service plus a Vercel static site.
+This keeps the architecture **phase-wise** for planning and milestones while preserving a **layered** runtime design (data → rules → model → presentation), then a **client–server shell** (API + UI) around that core, deployed as a Railway service plus a Vercel static site.

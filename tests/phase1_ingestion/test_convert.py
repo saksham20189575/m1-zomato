@@ -57,8 +57,8 @@ def test_row_to_restaurant_maps_fields() -> None:
 
 def test_row_to_restaurant_drops_unused_fields_for_memory() -> None:
     # Phase 1 deliberately discards descriptive Hub columns that no downstream
-    # phase reads, to keep an in-memory load comfortably inside Render's
-    # 512 MB free tier. See ``row_to_restaurant`` docstring.
+    # phase reads, to keep in-memory loads small on modest hosting tiers. See
+    # ``row_to_restaurant`` docstring.
     r = row_to_restaurant(_full_row())
     assert r is not None
     assert r.address == ""

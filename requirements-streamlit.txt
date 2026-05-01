@@ -1,3 +1,0 @@
-# Install for Streamlit Community Cloud (or any host that uses requirements.txt).
-# Repo root must be the working directory so the editable install resolves.
--e .[streamlit]

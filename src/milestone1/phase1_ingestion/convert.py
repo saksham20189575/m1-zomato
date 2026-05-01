@@ -27,7 +27,7 @@ def row_to_restaurant(row: Mapping[str, Any]) -> Restaurant | None:
     ``restaurant_type``, ``listing_type``, ``online_order``, ``book_table``,
     ``approx_cost_two_raw``) are intentionally **not** retained on the Restaurant.
     Each Hub row in this dataset can carry tens of KB of menu/review text; dropping it
-    here keeps an 8 000-row in-memory load comfortably inside Render's free 512 MB tier.
+    here keeps an 8 000-row in-memory load small enough for modest hosting tiers.
     """
     name = _text(row.get(C.COL_NAME))
     if not name:

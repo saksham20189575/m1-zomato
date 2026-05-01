@@ -1,0 +1,19 @@
+# Railway service config — see https://docs.railway.com/reference/config-as-code
+#
+# Nixpacks auto-detects the Python project from `pyproject.toml` and pins the
+# interpreter via `runtime.txt`. The build effectively runs `pip install .`
+# (non-editable) so `milestone1` is importable as a regular package.
+#
+# Secrets and tunables (GROQ_API_KEY, GROQ_MODEL, HF_TOKEN, CORS_ORIGINS,
+# optionally PREWARM and LOAD_LIMIT) live in the Railway dashboard under
+# Variables — never committed here.
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

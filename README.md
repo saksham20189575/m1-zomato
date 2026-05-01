@@ -22,7 +22,7 @@ tests/
 frontend/                # Vite + React web UI (Phase 7) — see “Run the web app”
 ```
 
-Each `phaseN_*` package through Phase 5 may own a `commands.py` registered from `cli.py`. **Phase 6 (API) and Phase 7 (web)** are started separately from the `milestone1` CLI. **Phase 8 (deployment)** ships the API to Render and the web UI to Vercel — see [`docs/deployment.md`](docs/deployment.md).
+Each `phaseN_*` package through Phase 5 may own a `commands.py` registered from `cli.py`. **Phase 6 (API) and Phase 7 (web)** are started separately from the `milestone1` CLI. **Phase 8 (deployment)** ships the API to Railway and the web UI to Vercel — see [`docs/deployment.md`](docs/deployment.md).
 
 ## Setup
 
@@ -117,9 +117,9 @@ npm run dev
 
 Open **http://localhost:5173** — the UI includes location hints from **`GET /api/v1/meta`**, form fields matching Phase 2, two distinct empty states, result cards, optional Groq “advanced” fields, and **Copy as Markdown**.
 
-## Phase 8 — Deployment (Render + Vercel)
+## Phase 8 — Deployment (Railway + Vercel)
 
-The shipped product is two independent deployments: the FastAPI service on **Render** (owns `GROQ_API_KEY`, dataset access) and the Vite + React app on **Vercel** (browser-only, points at the Render URL via `VITE_API_BASE_URL`). Step-by-step guide, env vars, and config snippets: [`docs/deployment.md`](docs/deployment.md).
+The shipped product is two independent deployments: the FastAPI service on **Railway** (owns `GROQ_API_KEY`, dataset access) and the Vite + React app on **Vercel** (browser-only, points at the Railway URL via `VITE_API_BASE_URL`). Step-by-step guide, env vars, and config snippets: [`docs/deployment.md`](docs/deployment.md).
 
 ## Tests
 

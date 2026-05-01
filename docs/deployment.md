@@ -1,60 +1,60 @@
-# Phase 8 — Deployment plan: Render (backend) + Vercel (frontend)
+# Phase 8 — Deployment plan: Railway (backend) + Vercel (frontend)
 
 This document is the canonical guide for deploying Milestone 1 as **two independent services**:
 
-- **Backend** — FastAPI app from `src/milestone1/phase6_api/` on **Render**.
+- **Backend** — FastAPI app from `src/milestone1/phase6_api/` on **Railway**.
 - **Frontend** — Vite + React SPA from `frontend/` on **Vercel**.
 
-The browser bundle is purely static and only talks to the Render URL over HTTPS. Provider keys (`GROQ_API_KEY`, optional `HF_TOKEN`) live **only** on Render.
+The browser bundle is purely static and only talks to the Railway URL over HTTPS. Provider keys (`GROQ_API_KEY`, optional `HF_TOKEN`) live **only** on Railway.
 
 ```mermaid
 flowchart LR
   user[User browser] -->|GET dist/index.html| vercel[Vercel CDN]
-  user -->|HTTPS JSON CORS| render[Render web service: uvicorn + FastAPI]
-  render -->|HF Hub| hf[Hugging Face]
-  render -->|chat completions| groq[Groq]
+  user -->|HTTPS JSON CORS| railway[Railway service: uvicorn + FastAPI]
+  railway -->|HF Hub| hf[Hugging Face]
+  railway -->|chat completions| groq[Groq]
 ```
 
 ---
 
 ## 0. One-time prep in the repo
 
-The repo already builds cleanly for both targets — Render reads `pyproject.toml`, Vercel reads `frontend/package.json`. Two small additions make the deploy reproducible without clicking around dashboards.
+The repo already builds cleanly for both targets — Railway reads `pyproject.toml` via Nixpacks, Vercel reads `frontend/package.json`. A few small files at the repo root make the deploy reproducible without clicking around dashboards.
 
-### 0.1 Pin a Python version for Render
+### 0.1 Pin a Python version
 
-Add a `runtime.txt` at the repo root so Render uses Python 3.11 (matches `requires-python` in `pyproject.toml`):
+`runtime.txt` at the repo root (already committed) tells Nixpacks which Python to install — same file works for Heroku-style buildpacks and several other PaaSes:
 
 ```text
 python-3.11.9
 ```
 
-### 0.2 Optional: `render.yaml` (Infrastructure-as-Code)
+This matches `requires-python = ">=3.11"` in `pyproject.toml`.
 
-Render can read a `render.yaml` blueprint at the repo root to provision the service automatically:
+### 0.2 `railway.toml` (Infrastructure-as-Code)
 
-```yaml
-services:
-  - type: web
-    name: milestone1-api
-    runtime: python
-    plan: free
-    buildCommand: pip install -e .
-    startCommand: uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    autoDeploy: true
-    envVars:
-      - key: GROQ_API_KEY
-        sync: false
-      - key: GROQ_MODEL
-        sync: false
-      - key: HF_TOKEN
-        sync: false
-      - key: CORS_ORIGINS
-        sync: false
+Railway reads `railway.toml` (or `railway.json`) at the repo root and uses it as the service blueprint. The committed file:
+
+```toml
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
 ```
 
-`sync: false` keeps secret values out of the repo; you set them in the Render dashboard.
+Notes:
+
+- **Builder** is Nixpacks (Railway's default). It detects Python from `pyproject.toml` + `runtime.txt` and runs `pip install .` automatically — no `buildCommand` override needed.
+- **Start command** binds `0.0.0.0:$PORT` so Railway's router can reach it. `milestone1.phase6_api.app:app` is module-scope (`app = create_app()`), so uvicorn imports it without invoking the `milestone1-api` console script.
+- **Health check** points at `/health`. Railway will mark the deploy unhealthy and roll back if `/health` doesn't return 2xx within `healthcheckTimeout` seconds.
+- **Restart policy** auto-recovers on transient crashes (e.g. HF Hub timeouts) up to 3 times before failing the deploy.
+
+Secrets and tunables are **not** in this file — they live in the Railway dashboard's **Variables** panel (see §1.3).
 
 ### 0.3 Optional: `frontend/vercel.json`
 
@@ -74,32 +74,43 @@ Vercel auto-detects Vite, but a small config makes SPA fallback explicit and avo
 
 ---
 
-## 1. Deploy the backend on Render
+## 1. Deploy the backend on Railway
 
-### 1.1 Create the service
+### 1.1 Create the project
+
+The fastest path is the dashboard:
 
 1. Push the repo to GitHub.
-2. Render dashboard → **New** → **Web Service** → connect the GitHub repo.
-3. If you committed `render.yaml`, choose **Blueprint** and Render fills in the rest. Otherwise use the manual settings below.
+2. Railway dashboard → **New Project** → **Deploy from GitHub repo** → pick the repo.
+3. Railway detects `railway.toml` automatically. The first build runs Nixpacks → `pip install .` → starts uvicorn.
 
-### 1.2 Manual settings (if not using `render.yaml`)
+Optional CLI path (for `railway up` from local):
+
+```bash
+npm i -g @railway/cli
+railway login
+railway link        # picks an existing project, or `railway init` to create one
+railway up          # builds and deploys from the working tree
+```
+
+### 1.2 Manual settings (only if you skip `railway.toml`)
+
+In the service's **Settings** tab:
 
 | Field | Value |
 |-------|-------|
-| Environment | **Python 3** |
-| Region | nearest free region |
-| Branch | `main` |
+| Builder | **Nixpacks** |
 | Root Directory | *(blank — repo root)* |
-| Build Command | `pip install -e .` |
 | Start Command | `uvicorn milestone1.phase6_api.app:app --host 0.0.0.0 --port $PORT` |
-| Health Check Path | `/health` |
-| Plan | Free (or paid for no cold starts) |
+| Healthcheck Path | `/health` |
+| Healthcheck Timeout | `30` |
+| Restart Policy | On failure |
 
-`milestone1.phase6_api.app:app` exists at module scope in `src/milestone1/phase6_api/app.py` (`app = create_app()`), so uvicorn can import it without running the `milestone1-api` console script. The startup hook **prewarms** the city list in a background thread, so the first `/api/v1/meta` and `/api/v1/recommendations` calls do not pay the full Hugging Face load cost.
+Then add a public domain under **Settings → Networking → Generate Domain** so the service is reachable at `https://<service>.up.railway.app`.
 
-### 1.3 Environment variables on Render
+### 1.3 Environment variables on Railway
 
-Set in **Environment → Environment Variables**:
+Set under the service's **Variables** tab:
 
 | Var | Required? | Purpose |
 |-----|-----------|---------|
@@ -107,42 +118,45 @@ Set in **Environment → Environment Variables**:
 | `GROQ_MODEL` | optional | Override default Groq model id (default: `llama-3.3-70b-versatile`). |
 | `HF_TOKEN` | optional | Higher Hugging Face Hub rate limits when streaming the dataset. |
 | `CORS_ORIGINS` | **yes (after Vercel deploy)** | Comma-separated list of allowed browser origins. See §3. |
-| `PORT` | auto | Render injects this; the app reads it via `uvicorn ... --port $PORT`. |
-| `PREWARM` | recommended `0` on free tier | Set to `0` to skip the boot-time locations preload (see §1.5). |
-| `LOAD_LIMIT` | recommended `3000` on free tier | Caps Hub rows scanned per request; lower = less RAM (see §1.5). |
+| `PORT` | auto | Railway injects this; the start command reads it via `--port $PORT`. |
+| `PREWARM` | optional | Set to `0` to skip the boot-time locations preload (see §1.5). |
+| `LOAD_LIMIT` | optional | Caps Hub rows scanned per request; lower = less RAM (see §1.5). |
 
 Do **not** add `API_HOST` — the start command already binds `0.0.0.0`.
 
 ### 1.4 Verify
 
-After the first deploy, hit:
+After the first deploy, Railway prints the public URL in the service's **Deployments** view. Hit:
 
-- `https://<service>.onrender.com/health` → `{"status":"ok","groq_configured":true}`
-- `https://<service>.onrender.com/api/v1/meta?cities_cap=20` → JSON with a `cities` array
-- `https://<service>.onrender.com/docs` → Swagger UI
+- `https://<service>.up.railway.app/health` → `{"status":"ok","groq_configured":true}`
+- `https://<service>.up.railway.app/api/v1/meta?cities_cap=20` → JSON with a `cities` array
+- `https://<service>.up.railway.app/docs` → Swagger UI
 
 Note the service URL — it goes into the Vercel build env next.
 
-> **Cold starts:** Render free-tier services sleep after ~15 minutes of inactivity. The first request after sleep can take 30–60 s. The Phase 6 prewarm thread reduces *post-startup* latency but does not eliminate the dyno boot itself. If demos need snappy first hits, upgrade the plan or hit `/health` from an uptime pinger (Better Stack / cron-job.org).
+> **Cold starts:** Railway services on the Trial/Hobby plans don't sleep on idle the way some free PaaSes do, so you generally won't pay an HF-load tax on the first request after a quiet period. Crash-restarts and redeploys still incur a Nixpacks build + uvicorn boot.
 
-### 1.5 Memory budget on the free tier (512 MB)
+### 1.5 Memory tunables (only if needed)
 
-Render's free Python web service is hard-capped at **512 MB RSS**. The dataset + LLM stack lands close to that cap by default, so the deploy ships two tunables:
+Railway's standard plans give services several GB of RAM, so the default settings (`PREWARM=1`, `LOAD_LIMIT=8000`) usually run fine. The two env knobs exist as escape valves if you ever:
 
-| Tunable | Default | On Render free | Effect |
-|---------|---------|----------------|--------|
-| `PREWARM` | `1` (on) | **`0`** | When off, the startup hook skips the background thread that loads ~8 000 rows into memory. The first `/api/v1/meta` call pays that cost on demand instead, against an already-warm process — and only once until the dyno sleeps. |
-| `LOAD_LIMIT` | `8000` | **`3000`** | Caps the per-request Hugging Face streaming scan. Each row is a normalized `Restaurant` dataclass. Halving the cap roughly halves the per-request transient allocation. |
+- run on a smaller container,
+- multiplex many services into one project's quota,
+- or move to a constrained tier.
 
-Both are pre-wired in `render.yaml`; no dashboard action required.
+| Tunable | Default | Tightened value | Effect |
+|---------|---------|-----------------|--------|
+| `PREWARM` | `1` (on) | `0` | When off, the startup hook skips the background thread that loads ~8 000 rows into memory. The first `/api/v1/meta` call pays that cost on demand instead, against an already-warm process. |
+| `LOAD_LIMIT` | `8000` | e.g. `3000` | Caps the per-request Hugging Face streaming scan. Each row becomes a normalized `Restaurant` dataclass. Halving the cap roughly halves the per-request transient allocation; smaller candidate pool, fewer cities in `/api/v1/meta`. |
 
-**What's also pruned in code:** Phase 1 normalization (`row_to_restaurant`) deliberately discards Hub columns no downstream phase reads — `address`, `menu_sample`, `dishes_liked`, `phone`, `url`, `restaurant_type`, `listing_type`, `online_order`, `book_table`, `approx_cost_two_raw`. On this dataset, `menu_item` and `dishes_liked` alone can be tens of KB per row; dropping them keeps a 3 000-row in-memory load under ~10 MB.
+**What's already pruned in code (regardless of platform):** Phase 1 normalization (`row_to_restaurant`) deliberately discards Hub columns no downstream phase reads — `address`, `menu_sample`, `dishes_liked`, `phone`, `url`, `restaurant_type`, `listing_type`, `online_order`, `book_table`, `approx_cost_two_raw`. On this dataset, `menu_item` and `dishes_liked` alone can be tens of KB per row; dropping them keeps an 8 000-row in-memory load under ~30 MB.
 
-If the instance still OOMs:
+If you ever do see an OOM:
 
-1. Lower `LOAD_LIMIT` further (e.g. `2000`, then `1500`). Trade-off: smaller candidate pool, fewer cities in `/api/v1/meta`.
-2. Confirm `PREWARM=0` and that you're not running multiple uvicorn workers (the start command in `render.yaml` is single-worker by default — do not add `--workers 2`).
-3. Last resort: bump to a paid Render plan with more RAM. The 1 GB tier deletes the constraint; bump back the env vars to the defaults above.
+1. Set `PREWARM=0` first — it eliminates a peak that overlaps with normal request handling.
+2. Then lower `LOAD_LIMIT` (try `3000`, then `2000`, then `1500`).
+3. Confirm you're running a single uvicorn worker (the `railway.toml` start command is single-worker by default — do not add `--workers 2`).
+4. Last resort: bump the Railway plan or restructure the project so the service has more RAM headroom.
 
 ---
 
@@ -164,7 +178,7 @@ Add under **Settings → Environment Variables**, scoped to **Production** (and 
 
 | Var | Value |
 |-----|-------|
-| `VITE_API_BASE_URL` | `https://<your-render-service>.onrender.com` (no trailing slash) |
+| `VITE_API_BASE_URL` | `https://<your-railway-service>.up.railway.app` (no trailing slash) |
 
 Vite inlines `VITE_*` vars at build time, so a redeploy is needed to pick up changes (Vercel does this automatically on env-var save).
 
@@ -175,14 +189,14 @@ Vite inlines `VITE_*` vars at build time, so a redeploy is needed to pick up cha
 After deploy:
 
 - `https://<project>.vercel.app/` loads the SPA.
-- DevTools → Network → submit the form → request goes to `https://<render>.onrender.com/api/v1/recommendations` and returns 200.
+- DevTools → Network → submit the form → request goes to `https://<railway>.up.railway.app/api/v1/recommendations` and returns 200.
 - If the request is blocked by the browser with a CORS error, you have not yet completed §3.
 
 ---
 
-## 3. Wire CORS on Render to the Vercel origin
+## 3. Wire CORS on Railway to the Vercel origin
 
-`src/milestone1/phase6_api/app.py` reads `CORS_ORIGINS` (comma-separated). Set it on Render to the exact origins the browser will use:
+`src/milestone1/phase6_api/app.py` reads `CORS_ORIGINS` (comma-separated). Set it on Railway to the exact origins the browser will use:
 
 ```text
 CORS_ORIGINS=https://<project>.vercel.app,https://<project>-git-main-<team>.vercel.app
@@ -192,9 +206,9 @@ Common gotchas:
 
 - **No trailing slash, no path.** Origin only: `https://foo.vercel.app`, not `https://foo.vercel.app/`.
 - **Custom domain?** Add it too: `CORS_ORIGINS=https://app.example.com,https://<project>.vercel.app`.
-- **Preview deploys** get unique subdomains. Either disable preview-env builds, point them at a separate staging Render service, or temporarily widen `CORS_ORIGINS` while testing — never to `*` for a credentialed app.
+- **Preview deploys** get unique subdomains. Either disable preview-env builds, point them at a separate staging Railway service, or temporarily widen `CORS_ORIGINS` while testing — never to `*` for a credentialed app.
 
-After saving the env var, Render restarts the service. Re-test the SPA call from the browser.
+Saving the variable triggers a Railway redeploy. Re-test the SPA call from the browser.
 
 ---
 
@@ -203,10 +217,10 @@ After saving the env var, Render restarts the service. Re-test the SPA call from
 Run these in order from the deployed Vercel URL:
 
 1. Page loads, hero + form render, no console errors.
-2. `GET /api/v1/meta` populates the city dropdown (visible on first paint, served by Render).
+2. `GET /api/v1/meta` populates the city dropdown (visible on first paint, served by Railway).
 3. Submit form with a valid city → status badge shows `source: llm` and ranked cards render.
 4. Submit with an obviously empty filter combo (e.g. min rating 5 + a quiet city) → renders the **no candidates** empty state copy from Phase 5.
-5. Tail Render logs (`Logs` tab) — request lines appear with `200`, telemetry JSON is logged on stderr.
+5. Tail Railway logs (service's **Logs** tab) — request lines appear with `200`, telemetry JSON is logged on stderr.
 
 If any step fails, see §5.
 
@@ -216,33 +230,33 @@ If any step fails, see §5.
 
 | Symptom | Likely cause / fix |
 |--------|---------------------|
-| Browser shows `CORS error` | `CORS_ORIGINS` on Render does not include the exact Vercel origin. Update env var, wait for restart. |
+| Browser shows `CORS error` | `CORS_ORIGINS` on Railway does not include the exact Vercel origin. Update variable, wait for redeploy. |
 | `Failed to fetch` from frontend | `VITE_API_BASE_URL` missing or wrong. Confirm value, then redeploy on Vercel. |
-| `groq_configured: false` from `/health` | `GROQ_API_KEY` not set on Render, or has whitespace. Re-paste, redeploy. |
-| First request hangs ~30 s | Render free-tier cold start. Ping `/health` first, or upgrade plan. |
-| `/api/v1/meta` 500s with HF errors | Hugging Face throttle. Set `HF_TOKEN` on Render, or lower `load_limit`. |
+| `groq_configured: false` from `/health` | `GROQ_API_KEY` not set on Railway, or has whitespace. Re-paste, redeploy. |
+| `/api/v1/meta` 500s with HF errors | Hugging Face throttle. Set `HF_TOKEN` on Railway, or lower `LOAD_LIMIT`. |
 | Vercel build fails on `tsc --noEmit` | Same TS error you would see locally — fix in `frontend/`, push, Vercel rebuilds. |
-| Render build fails on `pip install -e .` | Confirm `runtime.txt` is `python-3.11.x`; Render's default Python may be too old. |
-| Render logs `Ran out of memory (used over 512MB)` | Free-tier RSS cap. Confirm `PREWARM=0` and lower `LOAD_LIMIT` (try `2000`, then `1500`). See §1.5. |
+| Railway build fails on `pip install` | Confirm `runtime.txt` is `python-3.11.x`; check the Nixpacks log under **Deployments → View Logs** for the failing step. |
+| Railway healthcheck fails after deploy | App didn't bind `0.0.0.0:$PORT` in time. Confirm the start command in `railway.toml`; consider raising `healthcheckTimeout` if HF is slow. |
+| Logs show `Ran out of memory` | Apply the §1.5 escape valves: `PREWARM=0`, then lower `LOAD_LIMIT`. |
 
 ---
 
 ## 6. Rollback
 
-- **Backend:** Render keeps a deploy history; **Manual Deploy → Rollback** to a previous build.
-- **Frontend:** Vercel’s **Deployments** tab → **Promote to Production** on a known-good build.
+- **Backend:** Railway keeps a deploy history; in the service's **Deployments** tab pick a healthy build → **Redeploy**.
+- **Frontend:** Vercel's **Deployments** tab → **Promote to Production** on a known-good build.
 
 Both platforms support instant rollback without rebuilding.
 
 ---
 
-## 7. Cost shape (free-tier)
+## 7. Cost shape
 
-| Resource | Free tier | Notes |
-|----------|-----------|-------|
-| Render web service | 750 hrs/month | Sleeps when idle (cold starts). |
-| Vercel hobby | 100 GB bandwidth, 6k build min/month | Static SPA is essentially free at this scale. |
+| Resource | Plan | Notes |
+|----------|------|-------|
+| Railway service | Trial credits, then Hobby ($5/month) or higher | Generous RAM/CPU compared to other free PaaSes; pay-as-you-go past the credit. |
+| Vercel hobby | Free | 100 GB bandwidth, 6k build min/month — static SPA is essentially free at this scale. |
 | Groq | Free dev quota | Keep `candidate_cap` modest in the API request body. |
 | Hugging Face Hub | Anonymous | Add `HF_TOKEN` if you hit rate limits. |
 
-For demos and coursework, the free tiers are sufficient. For a graded review, hit `/health` once before the demo to wake the Render dyno.
+For demos and coursework, the Railway Trial credits + Vercel hobby is enough to keep the service responsive and the SPA snappy.
